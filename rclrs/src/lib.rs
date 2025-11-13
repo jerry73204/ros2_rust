@@ -1,4 +1,7 @@
 #![warn(missing_docs)]
+#![allow(clashing_extern_declarations)]
+#![allow(mismatched_lifetime_syntaxes)]
+#![allow(clippy::type_complexity)]
 //! Rust client library for ROS 2.
 //!
 //! Since this library depends on the ROS ecosystem, see the [README][1] for

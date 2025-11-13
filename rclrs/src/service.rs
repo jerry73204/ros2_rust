@@ -143,14 +143,14 @@ where
 
         let handle = Arc::new(ServiceHandle {
             rcl_service: Mutex::new(rcl_service),
-            node_handle: Arc::clone(&node_handle),
+            node_handle: Arc::clone(node_handle),
         });
 
         let (waitable, lifecycle) = Waitable::new(
             Box::new(ServiceExecutable::<T, Scope> {
                 handle: Arc::clone(&handle),
                 callback: Arc::clone(&callback),
-                commands: Arc::clone(&commands),
+                commands: Arc::clone(commands),
             }),
             Some(Arc::clone(commands.get_guard_condition())),
         );

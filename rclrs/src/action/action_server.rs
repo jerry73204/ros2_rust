@@ -315,7 +315,7 @@ impl<A: Action> ActionServerState<A> {
 
         let handle = Arc::new(ActionServerHandle {
             rcl_action_server: Mutex::new(rcl_action_server),
-            node_handle: Arc::clone(&node.handle()),
+            node_handle: Arc::clone(node.handle()),
             goals: Default::default(),
         });
 
@@ -369,7 +369,7 @@ impl<A: Action> ActionServerState<A> {
         // replaced by the callback.
         while let Ok(requested_goal) = receiver.try_recv() {
             let f = (*callback)(requested_goal);
-            let _ = self.board.node.commands().run(f);
+            std::mem::drop(self.board.node.commands().run(f));
         }
 
         *dispatch = GoalDispatch::Callback(callback);
@@ -418,7 +418,7 @@ impl<A: Action> ActionServerGoalBoard<A> {
         match &mut *self.dispatch.lock()? {
             GoalDispatch::Callback(callback) => {
                 let f = callback(requested_goal);
-                let _ = self.node.commands().run(f);
+                std::mem::drop(self.node.commands().run(f));
             }
             GoalDispatch::Sender(sender) => {
                 // A send error means the user has dropped their receiver, so
@@ -505,8 +505,10 @@ impl<A: Action> ActionServerGoalBoard<A> {
                     // We have a special response type for this specific request.
                     // Either the goal has been terminated or we don't know about
                     // it at all.
-                    let mut response = CancelGoal_Response::default();
-                    response.return_code = response_code as i8;
+                    let response = CancelGoal_Response {
+                        return_code: response_code as i8,
+                        ..Default::default()
+                    };
                     let mut response_rmw =
                         CancelGoal_Response::into_rmw_message(Cow::Owned(response)).into_owned();
                     return unsafe {
@@ -535,15 +537,13 @@ impl<A: Action> ActionServerGoalBoard<A> {
         for goal in waiting_for {
             if let Some(live_goal) = live_goals.get(&goal).and_then(|goal| goal.upgrade()) {
                 live_goal.request_cancellation(cancellation_request.clone());
-            } else {
-                if let Some(handle) = self.handle.goals.lock()?.get(&goal) {
-                    // If the goal is already cancelled then we will say that we
-                    // accept the cancellation request. There is no need to
-                    // check for the cancelling state since non-live goals must
-                    // be in a terminal state.
-                    if handle.is_cancelled() {
-                        cancellation_request.accept(goal);
-                    }
+            } else if let Some(handle) = self.handle.goals.lock()?.get(&goal) {
+                // If the goal is already cancelled then we will say that we
+                // accept the cancellation request. There is no need to
+                // check for the cancelling state since non-live goals must
+                // be in a terminal state.
+                if handle.is_cancelled() {
+                    cancellation_request.accept(goal);
                 }
             }
         }

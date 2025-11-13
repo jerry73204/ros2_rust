@@ -66,6 +66,7 @@ impl<A: Action> GoalClient<A> {
             let initial_value = (*status.borrow_and_update()).clone();
             yield GoalEvent::Status(initial_value);
 
+            #[allow(clippy::redundant_pattern_matching)]
             while let Ok(_) = status.changed().await {
                 let value = (*status.borrow_and_update()).clone();
                 yield GoalEvent::Status(value);

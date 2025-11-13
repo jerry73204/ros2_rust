@@ -7,5 +7,6 @@ pub mod builtin_interfaces;
 pub mod example_interfaces;
 pub mod rcl_interfaces;
 pub mod rosgraph_msgs;
+#[cfg(test)]
 pub mod test_msgs;
 pub mod unique_identifier_msgs;
