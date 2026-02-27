@@ -55,6 +55,8 @@ pub struct TopicEndpointInfo {
     pub node_namespace: String,
     /// The type of the topic
     pub topic_type: String,
+    /// The QoS profile of the endpoint
+    pub qos_profile: crate::QoSProfile,
 }
 
 impl NodeState {
@@ -408,6 +410,7 @@ impl NodeState {
                     node_name,
                     node_namespace,
                     topic_type,
+                    qos_profile: crate::QoSProfile::from(&info.qos_profile),
                 }
             })
             .collect();
