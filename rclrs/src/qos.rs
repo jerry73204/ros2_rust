@@ -511,6 +511,7 @@ impl From<&rmw_qos_liveliness_policy_t> for QoSLivelinessPolicy {
             rmw_qos_liveliness_policy_e::RMW_QOS_POLICY_LIVELINESS_BEST_AVAILABLE => {
                 QoSLivelinessPolicy::BestAvailable
             }
+            #[cfg(rmw_liveliness_manual_by_node)]
             rmw_qos_liveliness_policy_e::RMW_QOS_POLICY_LIVELINESS_MANUAL_BY_NODE => {
                 log_error!(
                     "QoSLivelinessPolicy.conversion",

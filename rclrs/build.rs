@@ -26,6 +26,7 @@ fn main() {
     // Any distribution name: a release newer than this crate is still built.
     println!("cargo:rustc-check-cfg=cfg(ros_distro, values(any()))");
     println!("cargo:rustc-check-cfg=cfg(rclrs_bindings_generated)");
+    println!("cargo:rustc-check-cfg=cfg(rmw_liveliness_manual_by_node)");
     println!("cargo:rerun-if-env-changed={ROS_DISTRO}");
     println!("cargo:rerun-if-env-changed={AMENT_PREFIX_PATH}");
     println!("cargo:rerun-if-env-changed=RCLRS_GENERATE_BINDINGS");
@@ -62,9 +63,20 @@ fn main() {
     let ament_prefix_paths = get_env_var_or_abort(AMENT_PREFIX_PATH);
 
     let force = env::var("RCLRS_GENERATE_BINDINGS").is_ok_and(|v| v == "1");
-    if force || !CHECKED_IN_DISTROS.contains(&ros_distro.as_str()) {
-        generate_bindings(&ament_prefix_paths);
+    let bindings = if force || !CHECKED_IN_DISTROS.contains(&ros_distro.as_str()) {
         println!("cargo:rustc-cfg=rclrs_bindings_generated");
+        generate_bindings(&ament_prefix_paths)
+    } else {
+        let manifest_dir = PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap());
+        std::fs::read_to_string(
+            manifest_dir.join(format!("src/rcl_bindings_generated_{ros_distro}.rs")),
+        )
+        .unwrap_or_default()
+    };
+    // Items a distribution may drop. Lyrical removed the deprecated
+    // MANUAL_BY_NODE liveliness policy.
+    if bindings.contains("RMW_QOS_POLICY_LIVELINESS_MANUAL_BY_NODE") {
+        println!("cargo:rustc-cfg=rmw_liveliness_manual_by_node");
     }
     for ament_prefix_path in ament_prefix_paths.split(':').map(Path::new) {
         // Link the native libraries
@@ -82,8 +94,8 @@ fn main() {
 
 /// Run bindgen on `src/rcl_wrapper.h` against the sourced distribution's
 /// headers, with the options of `generate_bindings.py` (which writes the
-/// checked-in files), into `$OUT_DIR/rcl_bindings.rs`.
-fn generate_bindings(ament_prefix_paths: &str) {
+/// checked-in files), into `$OUT_DIR/rcl_bindings.rs`. Returns the bindings.
+fn generate_bindings(ament_prefix_paths: &str) -> String {
     let manifest_dir = PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap());
     let out = PathBuf::from(env::var("OUT_DIR").unwrap()).join("rcl_bindings.rs");
 
@@ -132,11 +144,12 @@ fn generate_bindings(ament_prefix_paths: &str) {
             "rosidl_typesupport_.*__get_{kind}_type_support_handle__.*"
         ));
     }
-    builder
+    let bindings = builder
         .generate()
         .unwrap_or_else(|e| {
             panic!("rclrs: generating the rcl bindings for this ROS distribution failed: {e}")
         })
-        .write_to_file(&out)
-        .expect("rclrs: writing the generated rcl bindings failed");
+        .to_string();
+    std::fs::write(&out, &bindings).expect("rclrs: writing the generated rcl bindings failed");
+    bindings
 }
