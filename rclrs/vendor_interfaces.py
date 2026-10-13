@@ -23,6 +23,10 @@ vendored_packages = [
   "unique_identifier_msgs",
 ]
 
+# Vendored only for rclrs's tests and doc examples (see main()).
+TEST_ONLY = {"example_interfaces", "test_msgs"}
+
+
 def get_args():
   parser = argparse.ArgumentParser(description='Vendor interface packages into rclrs')
   parser.add_argument('install_base', metavar='install_base', type=Path,
@@ -66,6 +70,12 @@ def main():
   mod_contents += "#![allow(missing_docs)]\n"
   mod_contents += "\n"
   for pkg in vendored_packages:
+    if pkg in TEST_ONLY:
+      # Only rclrs's own tests and doc examples use these. Left in a normal
+      # build, their #[link] attributes make the binary need these ROS
+      # packages wherever the linker keeps unused libraries (GNU ld on
+      # aarch64), though nothing calls them.
+      mod_contents += '#[cfg(any(test, feature = "test-interfaces"))]\n'
     mod_contents += f"pub mod {pkg};\n"
   (vendor_dir / 'mod.rs').write_text(mod_contents)
 

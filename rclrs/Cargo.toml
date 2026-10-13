@@ -74,7 +74,11 @@ serde = ["dep:serde", "dep:serde-big-array", "rosidl_runtime_rs/serde"]
 # This feature is solely for the purpose of being able to generate documetation without a ROS installation
 # The only intended usage of this feature is for docs.rs builders to work, and is not intended to be used by end users
 use_ros_shim = ["rosidl_runtime_rs/use_ros_shim"]
+# The vendored example_interfaces and test_msgs, which rclrs's tests have
+# without it and its doc examples need it for (`cargo test --doc --features
+# test-interfaces`). Off by default so a build does not link those packages.
+test-interfaces = []
 
 [package.metadata.docs.rs]
-features = ["use_ros_shim"]
+features = ["use_ros_shim", "test-interfaces"]
 rustc-args = ["--cfg", "ros_distro=\"humble\""]
