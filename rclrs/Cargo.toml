@@ -64,6 +64,9 @@ tokio = { version = "1", features = ["rt", "time", "macros"] }
 # Needed for uploading documentation to docs.rs
 cfg-if = "1.0.0"
 rustflags = "0.1"
+# Generates the rcl bindings for a distribution without checked-in ones
+# (Rolling, and any release newer than this crate). Needs libclang then.
+bindgen = "0.72"
 
 [features]
 default = []

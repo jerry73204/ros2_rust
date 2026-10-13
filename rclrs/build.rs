@@ -1,6 +1,15 @@
-use std::{env, path::Path};
+use std::{
+    env,
+    path::{Path, PathBuf},
+};
 const AMENT_PREFIX_PATH: &str = "AMENT_PREFIX_PATH";
 const ROS_DISTRO: &str = "ROS_DISTRO";
+
+/// Distributions with checked-in bindings (`src/rcl_bindings_generated_<d>.rs`)
+/// that are used as is. Any other distribution, Rolling included since it
+/// keeps changing, gets bindings generated from its own headers at build
+/// time. `RCLRS_GENERATE_BINDINGS=1` forces generation for these too.
+const CHECKED_IN_DISTROS: &[&str] = &["humble", "jazzy", "kilted"];
 
 fn get_env_var_or_abort(env_var: &'static str) -> String {
     if let Ok(value) = env::var(env_var) {
@@ -14,10 +23,13 @@ fn get_env_var_or_abort(env_var: &'static str) -> String {
 }
 
 fn main() {
-    println!(
-        "cargo:rustc-check-cfg=cfg(ros_distro, values(\"{}\"))",
-        ["humble", "jazzy", "kilted", "rolling"].join("\", \"")
-    );
+    // Any distribution name: a release newer than this crate is still built.
+    println!("cargo:rustc-check-cfg=cfg(ros_distro, values(any()))");
+    println!("cargo:rustc-check-cfg=cfg(rclrs_bindings_generated)");
+    println!("cargo:rerun-if-env-changed={ROS_DISTRO}");
+    println!("cargo:rerun-if-env-changed={AMENT_PREFIX_PATH}");
+    println!("cargo:rerun-if-env-changed=RCLRS_GENERATE_BINDINGS");
+    println!("cargo:rerun-if-changed=src/rcl_wrapper.h");
     let ros_distro = if let Ok(value) = env::var(ROS_DISTRO) {
         value
     } else {
@@ -48,6 +60,12 @@ fn main() {
     println!("cargo:rustc-cfg=ros_distro=\"{ros_distro}\"");
 
     let ament_prefix_paths = get_env_var_or_abort(AMENT_PREFIX_PATH);
+
+    let force = env::var("RCLRS_GENERATE_BINDINGS").is_ok_and(|v| v == "1");
+    if force || !CHECKED_IN_DISTROS.contains(&ros_distro.as_str()) {
+        generate_bindings(&ament_prefix_paths);
+        println!("cargo:rustc-cfg=rclrs_bindings_generated");
+    }
     for ament_prefix_path in ament_prefix_paths.split(':').map(Path::new) {
         // Link the native libraries
         let library_path = ament_prefix_path.join("lib");
@@ -60,4 +78,65 @@ fn main() {
     println!("cargo:rustc-link-lib=dylib=rcutils");
     println!("cargo:rustc-link-lib=dylib=rmw");
     println!("cargo:rustc-link-lib=dylib=rmw_implementation");
+}
+
+/// Run bindgen on `src/rcl_wrapper.h` against the sourced distribution's
+/// headers, with the options of `generate_bindings.py` (which writes the
+/// checked-in files), into `$OUT_DIR/rcl_bindings.rs`.
+fn generate_bindings(ament_prefix_paths: &str) {
+    let manifest_dir = PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap());
+    let out = PathBuf::from(env::var("OUT_DIR").unwrap()).join("rcl_bindings.rs");
+
+    // -isystem <prefix>/include/<package> for every package in the ament
+    // index, as the script does. Only registered packages: a prefix's
+    // include/ also holds other directories (e.g. Cyclone's idl/) that must
+    // not shadow the real headers.
+    let mut clang_args = Vec::new();
+    for prefix in ament_prefix_paths.split(':').filter(|p| !p.is_empty()) {
+        let prefix = Path::new(prefix);
+        let index = prefix.join("share/ament_index/resource_index/packages");
+        let Ok(entries) = std::fs::read_dir(index) else {
+            continue;
+        };
+        let mut dirs: Vec<PathBuf> = entries
+            .filter_map(|e| e.ok())
+            .map(|e| prefix.join("include").join(e.file_name()))
+            .filter(|p| p.is_dir())
+            .collect();
+        dirs.sort();
+        for dir in dirs {
+            clang_args.push("-isystem".to_string());
+            clang_args.push(dir.display().to_string());
+        }
+    }
+
+    let mut builder = bindgen::Builder::default()
+        .header(manifest_dir.join("src/rcl_wrapper.h").display().to_string())
+        .clang_args(clang_args)
+        .derive_copy(false)
+        .layout_tests(false)
+        .default_enum_style(bindgen::EnumVariation::Rust {
+            non_exhaustive: false,
+        });
+    for prefix in ["rcl_", "rmw_", "rcutils_", "rosidl_"] {
+        let pattern = format!("{prefix}.*");
+        builder = builder
+            .allowlist_type(&pattern)
+            .allowlist_function(&pattern)
+            .allowlist_var(&pattern);
+    }
+    // Declared by the vendored message crates already (rosidl_generator_rs
+    // generates them with a *const c_void return type).
+    for kind in ["message", "service", "action"] {
+        builder = builder.blocklist_function(format!(
+            "rosidl_typesupport_.*__get_{kind}_type_support_handle__.*"
+        ));
+    }
+    builder
+        .generate()
+        .unwrap_or_else(|e| {
+            panic!("rclrs: generating the rcl bindings for this ROS distribution failed: {e}")
+        })
+        .write_to_file(&out)
+        .expect("rclrs: writing the generated rcl bindings failed");
 }
