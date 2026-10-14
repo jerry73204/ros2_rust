@@ -2,7 +2,10 @@ use std::{
     ffi::CString,
     os::raw::c_char,
     string::String,
-    sync::{Arc, Mutex},
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc, Mutex,
+    },
     vec::Vec,
 };
 
@@ -85,6 +88,39 @@ pub(crate) struct ContextHandle {
     /// has dropped.
     #[allow(unused)]
     logging: Arc<LoggingLifecycle>,
+    /// Declared after `rcl_context`, so it is dropped, and reports the context
+    /// finalized, only once `rcl_shutdown` and `rcl_context_fini` have returned.
+    #[allow(unused)]
+    finalized: FinalizedFlag,
+}
+
+/// Sets its flag when dropped.
+struct FinalizedFlag(Arc<AtomicBool>);
+
+impl Drop for FinalizedFlag {
+    fn drop(&mut self) {
+        self.0.store(true, Ordering::Release);
+    }
+}
+
+/// Observes whether a [`Context`] has been finalized, without keeping it alive.
+///
+/// A context is finalized when the last reference to it is dropped: the
+/// `Context` itself, every executor and node created from it, and every
+/// entity created from those nodes. Until then the middleware's resources,
+/// such as a DDS participant, are still held. An application that must leave
+/// the ROS graph before doing something else drops what it holds and waits
+/// for [`ContextObserver::is_finalized`].
+#[derive(Clone, Debug)]
+pub struct ContextObserver {
+    finalized: Arc<AtomicBool>,
+}
+
+impl ContextObserver {
+    /// Whether the context has been shut down and finalized.
+    pub fn is_finalized(&self) -> bool {
+        self.finalized.load(Ordering::Acquire)
+    }
 }
 
 impl Default for Context {
@@ -183,6 +219,7 @@ impl Context {
             handle: Arc::new(ContextHandle {
                 rcl_context: Mutex::new(rcl_context),
                 logging,
+                finalized: FinalizedFlag(Arc::new(AtomicBool::new(false))),
             }),
         })
     }
@@ -224,6 +261,14 @@ impl Context {
 
         debug_assert_eq!(ret, 0);
         domain_id
+    }
+
+    /// An observer that reports when this context has been finalized, and
+    /// does not keep it alive.
+    pub fn observer(&self) -> ContextObserver {
+        ContextObserver {
+            finalized: Arc::clone(&self.handle.finalized.0),
+        }
     }
 
     /// Checks if the context is still valid.
