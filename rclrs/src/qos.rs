@@ -38,6 +38,13 @@ pub enum QoSHistoryPolicy {
     },
     /// Keep all messages, at least until other resource limits are exceeded.
     KeepAll,
+    /// The policy is not known. This is what the graph reports for an endpoint
+    /// of another participant, since DDS discovery does not carry the history
+    /// policy; it is not a value to create an endpoint with.
+    Unknown {
+        /// The depth the middleware reported alongside the unknown policy.
+        depth: u32,
+    },
 }
 
 /// The `RELIABILITY` DDS QoS policy.
@@ -203,6 +210,7 @@ impl From<QoSProfile> for rmw_qos_profile_t {
                 QoSHistoryPolicy::SystemDefault { depth } => depth as usize,
                 QoSHistoryPolicy::KeepLast { depth } => depth as usize,
                 QoSHistoryPolicy::KeepAll => 0,
+                QoSHistoryPolicy::Unknown { depth } => depth as usize,
             },
             reliability: qos.reliability.into(),
             durability: qos.durability.into(),
@@ -229,15 +237,9 @@ impl From<&rmw_qos_profile_t> for QoSProfile {
                 }
             }
             rmw_qos_history_policy_e::RMW_QOS_POLICY_HISTORY_KEEP_ALL => QoSHistoryPolicy::KeepAll,
-            rmw_qos_history_policy_e::RMW_QOS_POLICY_HISTORY_UNKNOWN => {
-                log_error!(
-                    "QoSProfile.conversion",
-                    "History policy is unknown. Converting as KeepLast.",
-                );
-                QoSHistoryPolicy::KeepLast {
-                    depth: profile.depth as u32,
-                }
-            }
+            rmw_qos_history_policy_e::RMW_QOS_POLICY_HISTORY_UNKNOWN => QoSHistoryPolicy::Unknown {
+                depth: profile.depth as u32,
+            },
         };
 
         QoSProfile {
@@ -377,6 +379,9 @@ impl From<QoSHistoryPolicy> for rmw_qos_history_policy_t {
                 rmw_qos_history_policy_t::RMW_QOS_POLICY_HISTORY_KEEP_LAST
             }
             QoSHistoryPolicy::KeepAll => rmw_qos_history_policy_t::RMW_QOS_POLICY_HISTORY_KEEP_ALL,
+            QoSHistoryPolicy::Unknown { .. } => {
+                rmw_qos_history_policy_t::RMW_QOS_POLICY_HISTORY_UNKNOWN
+            }
         }
     }
 }
